@@ -118,7 +118,7 @@ private:
     void InstallPrint();
     void RemoveUnsafeBaseFuncs();
     void PushLuaValue(const FLuaValue& Value);
-    FLuaValue PopLuaValue();
+    FLuaValue PopLuaValue() const;
     bool GetTableByPath(const FString& TablePath) const;
 
 private:

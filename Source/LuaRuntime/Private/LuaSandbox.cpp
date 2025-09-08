@@ -596,7 +596,7 @@ void ULuaSandbox::PushLuaValue(const FLuaValue& Value)
     }
 }
 
-FLuaValue ULuaSandbox::PopLuaValue()
+FLuaValue ULuaSandbox::PopLuaValue() const
 {
     FLuaValue Value;
     if (!L) return Value;
