@@ -16,6 +16,27 @@ struct FLuaRunResult
 
     UPROPERTY(BlueprintReadOnly)
     FString Error;
+
+    UPROPERTY(BlueprintReadOnly)
+    FString ReturnValue;
+};
+
+USTRUCT(BlueprintType)
+struct FLuaValue
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite)
+    FString StringValue;
+
+    UPROPERTY(BlueprintReadWrite)
+    double NumberValue = 0.0;
+
+    UPROPERTY(BlueprintReadWrite)
+    bool BoolValue = false;
+
+    UPROPERTY(BlueprintReadWrite)
+    bool bIsNil = true;
 };
 
 UCLASS(BlueprintType)
@@ -48,11 +69,57 @@ public:
     UFUNCTION(BlueprintCallable, Category = "LuaRuntime")
     void Close();
 
+    UFUNCTION(BlueprintCallable, Category = "LuaRuntime")
+    void SetGlobalBool(const FName Name, bool Value);
+
+    UFUNCTION(BlueprintCallable, Category = "LuaRuntime")
+    bool GetGlobalBool(const FName Name, bool& OutValue) const;
+
+    UFUNCTION(BlueprintCallable, Category = "LuaRuntime", meta = (DisplayName = "Call Lua Function"))
+    FLuaRunResult CallFunction(const FString& FunctionName, const TArray<FLuaValue>& Args, int32 TimeoutMs = 50);
+
+    UFUNCTION(BlueprintCallable, Category = "LuaRuntime")
+    bool HasGlobal(const FName Name) const;
+
+    UFUNCTION(BlueprintCallable, Category = "LuaRuntime")
+    void ClearGlobal(const FName Name);
+
+    UFUNCTION(BlueprintCallable, Category = "LuaRuntime")
+    TArray<FString> GetGlobalNames() const;
+
+    UFUNCTION(BlueprintCallable, Category = "LuaRuntime", meta = (DisplayName = "Set Table Value"))
+    bool SetTableValue(const FString& TablePath, const FString& Key, const FLuaValue& Value);
+
+    UFUNCTION(BlueprintCallable, Category = "LuaRuntime", meta = (DisplayName = "Get Table Value"))
+    bool GetTableValue(const FString& TablePath, const FString& Key, FLuaValue& OutValue) const;
+
+    UFUNCTION(BlueprintCallable, Category = "LuaRuntime")
+    FLuaRunResult RunFile(const FString& FilePath, int32 TimeoutMs = 50, int32 HookInterval = 1000);
+
+    UFUNCTION(BlueprintCallable, Category = "LuaRuntime", meta = (DisplayName = "Register Blueprint Callback"))
+    void RegisterCallback(const FString& CallbackName);
+
+    UFUNCTION(BlueprintCallable, Category = "LuaRuntime")
+    int64 GetMemoryUsage() const;
+
+    UFUNCTION(BlueprintCallable, Category = "LuaRuntime")
+    void SetMemoryLimit(int32 NewLimitKB);
+
+    UFUNCTION(BlueprintCallable, Category = "LuaRuntime", meta = (DisplayName = "Evaluate Expression"))
+    FLuaRunResult EvaluateExpression(const FString& Expression, int32 TimeoutMs = 50);
+
+    DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnLuaCallback, const FString&, CallbackName, const TArray<FLuaValue>&, Args);
+    UPROPERTY(BlueprintAssignable, Category = "LuaRuntime")
+    FOnLuaCallback OnLuaCallback;
+
 private:
     void* CreateState(int32 MemoryLimitKB);
     void OpenSafeLibs();
     void InstallPrint();
     void RemoveUnsafeBaseFuncs();
+    void PushLuaValue(const FLuaValue& Value);
+    FLuaValue PopLuaValue();
+    bool GetTableByPath(const FString& TablePath) const;
 
 private:
     lua_State* L = nullptr;
