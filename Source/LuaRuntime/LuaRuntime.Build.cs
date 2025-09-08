@@ -10,16 +10,19 @@ public class LuaRuntime : ModuleRules
 		
 		PublicIncludePaths.AddRange(
 			new string[] {
-				// ... add public include paths required here ...
+				// Public headers
 			}
 			);
 				
 		
-		PrivateIncludePaths.AddRange(
-			new string[] {
-				// ... add other private include paths required here ...
-			}
-			);
+        PrivateIncludePaths.AddRange(
+            new string[] {
+                // Lua slim sources (compiled into this module)
+                System.IO.Path.Combine(ModuleDirectory, "Private", "ThirdParty", "lua_slim", "src"),
+                // Full Lua headers (do not compile sources here)
+                System.IO.Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "lua-5.4.7", "src"),
+            }
+        );
 			
 		
 		PublicDependencyModuleNames.AddRange(
@@ -40,7 +43,11 @@ public class LuaRuntime : ModuleRules
 				"SlateCore",
 				// ... add private dependencies that you statically link with here ...	
 			}
-			);
+		);
+
+		// Treat C files as C and not C++ where applicable
+		bEnableUndefinedIdentifierWarnings = false;
+		bUseRTTI = false;
 		
 		
 		DynamicallyLoadedModuleNames.AddRange(

@@ -4,9 +4,11 @@
 
 #define LOCTEXT_NAMESPACE "FLuaRuntimeModule"
 
+DEFINE_LOG_CATEGORY(LogLuaRuntime);
+
 void FLuaRuntimeModule::StartupModule()
 {
-	// This code will execute after your module is loaded into memory; the exact timing is specified in the .uplugin file per-module
+	// Initialize anything global to the module here if needed
 }
 
 void FLuaRuntimeModule::ShutdownModule()
