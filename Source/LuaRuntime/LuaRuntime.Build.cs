@@ -42,6 +42,8 @@ public class LuaRuntime : ModuleRules
                 "Slate",
                 "SlateCore",
                 "DeveloperSettings",
+                "Json",
+                "JsonUtilities",
                 // ... add private dependencies that you statically link with here ... 
             }
         );

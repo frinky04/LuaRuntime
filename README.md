@@ -50,9 +50,19 @@
 - `LuaSandbox.Close()` → free the sandbox.
 
 ### Data Structures
-- `FLuaRunResult` → Contains `bSuccess` (bool), `Error` (FString), and `ReturnValue` (FString).
-- `FLuaValue` → Flexible value type with `StringValue`, `NumberValue`, `BoolValue`, and `bIsNil` fields.
-- `OnLuaCallback` → Blueprint event delegate that fires when Lua calls a registered callback.
+- `FLuaRunResult` → `bSuccess`, `Error`, `ReturnValue` (legacy string return).
+- `FLuaDynValue` (recommended) → Tagged union: `Nil/Boolean/Number/String/Array/Table`.
+- `ULuaValueObject` → UObject wrapper used inside `FLuaDynValue.Array/Table` for nested values.
+- `OnLuaCallback` → Blueprint event when Lua calls a registered callback.
+
+### Dynamic Values (QOL)
+- Run/eval: `RunStringDyn`, `RunFileDyn`, `EvaluateExpressionDyn` (return `FLuaDynValue`).
+- Globals: `SetGlobalDyn`, `GetGlobalDyn`.
+- Tables: `SetTableValueDyn`, `GetTableValueDyn`.
+- Calls: `CallFunctionDyn` (args as `TArray<FLuaDynValue>`).
+- Blueprint helpers (`LuaValueLibrary`): `MakeLuaString/Number/Boolean/Nil/Array/Table`,
+  `LuaValue_IsArray/IsTable/IsNil`, `LuaValue_ArrayLength`, `LuaValue_GetArrayItem`,
+  `LuaValue_GetTableKeys`, `LuaValue_TryGetTableValue`, `LuaValue_ToJson`, `LuaValue_FromJson`.
 
 ## Actor Component
 - `ULuaComponent` can be added to any Actor.
@@ -107,6 +117,14 @@ return result
 ```
 The `FLuaRunResult.ReturnValue` will contain "42" as a string.
 
+With dynamic API:
+```blueprint
+Execute Lua Chunk (Dyn): Code="return { stats={ hp=100 }, items={"sword","potion"} }"
+→ OutValue.Type = Table
+→ LuaValue_TryGetTableValue(OutValue, "stats", Stats)
+→ LuaValue_TryGetTableValue(OutValue, "items", Items)
+```
+
 ### Function Calling
 ```lua
 function multiply(a, b)
@@ -133,7 +151,9 @@ player = {
     }
 }
 ```
-Then use `GetTableValue("player.stats", "health")` to retrieve nested values.
+Then use either:
+- Legacy: `GetTableValue("player.stats", "health")` → `FLuaValue`.
+- Dynamic: `GetTableValueDyn("player.stats", "health")` → `FLuaDynValue (Number)`.
 
 ### Blueprint Callbacks
 Register a callback: `RegisterCallback("onEvent")`

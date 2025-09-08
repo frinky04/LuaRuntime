@@ -25,4 +25,10 @@ public:
 
     UFUNCTION(BlueprintCallable, Category="Lua", meta=(WorldContext="WorldContextObject", DisplayName="Execute Lua Script Asset"))
     static FLuaRunResult ExecuteLuaScriptAsset(const UObject* WorldContextObject, class ULuaScript* Script, int32 MemoryLimitKB = 1024, int32 TimeoutMs = 50, int32 HookInterval = 1000);
+
+    UFUNCTION(BlueprintCallable, Category="Lua", meta=(WorldContext="WorldContextObject", DisplayName="Execute Lua Chunk (Dyn)"))
+    static bool ExecuteLuaChunkDyn(const UObject* WorldContextObject, const FString& Code, FLuaDynValue& OutValue, FString& OutError, int32 MemoryLimitKB = 1024, int32 TimeoutMs = 50, int32 HookInterval = 1000);
+
+    UFUNCTION(BlueprintCallable, Category="Lua", meta=(WorldContext="WorldContextObject", DisplayName="Evaluate Lua Expression (Dyn)"))
+    static bool EvaluateLuaExpressionDyn(const UObject* WorldContextObject, const FString& Expression, FLuaDynValue& OutValue, FString& OutError, int32 MemoryLimitKB = 1024, int32 TimeoutMs = 50);
 };

@@ -82,6 +82,142 @@ static void LuaHook(lua_State* L, lua_Debug* /*ar*/)
     HookTimeout(L);
 }
 
+// Recursively convert a Lua value at a given index to FLuaDynValue.
+// Performs deep copy for tables; detects array-like tables (1..N integer keys only).
+static void ConvertLuaToDynValue(lua_State* L, int Index, FLuaDynValue& Out, ULuaSandbox* Owner, int Depth = 0, int MaxDepth = 32, TSet<const void*>* InVisited = nullptr)
+{
+    const int absIndex = lua_absindex(L, Index);
+
+    const int type = lua_type(L, absIndex);
+    switch (type)
+    {
+    case LUA_TNIL:
+        Out.Type = ELuaType::Nil; return;
+    case LUA_TBOOLEAN:
+        Out.Type = ELuaType::Boolean; Out.Boolean = lua_toboolean(L, absIndex) != 0; return;
+    case LUA_TNUMBER:
+        Out.Type = ELuaType::Number; Out.Number = lua_tonumber(L, absIndex); return;
+    case LUA_TSTRING:
+    {
+        size_t len = 0; const char* s = lua_tolstring(L, absIndex, &len);
+        Out.Type = ELuaType::String; Out.String = FString(len, UTF8_TO_TCHAR(s)); return;
+    }
+    case LUA_TTABLE:
+    {
+        Out.Type = ELuaType::Table;
+        if (Depth >= MaxDepth)
+        {
+            // Depth cap; do not descend further
+            return;
+        }
+        TSet<const void*> LocalVisited;
+        TSet<const void*>* Visited = InVisited ? InVisited : &LocalVisited;
+        const void* Ptr = lua_topointer(L, absIndex);
+        if (Visited->Contains(Ptr))
+        {
+            // Cycle detected; stop here
+            return;
+        }
+        Visited->Add(Ptr);
+
+        const lua_Integer rawLen = (lua_Integer)lua_rawlen(L, absIndex);
+        bool bArrayCandidate = true;
+        int32 Count = 0;
+
+        lua_pushnil(L);
+        while (lua_next(L, absIndex) != 0)
+        {
+            // stack: ... key value
+            if (lua_type(L, -2) == LUA_TNUMBER)
+            {
+                lua_Number n = lua_tonumber(L, -2);
+                lua_Integer i;
+                if (modf(n, &n) != 0.0) // non-integer
+                {
+                    bArrayCandidate = false;
+                }
+                else
+                {
+                    i = (lua_Integer)lua_tointeger(L, -2);
+                    if (i < 1 || i > rawLen)
+                    {
+                        bArrayCandidate = false;
+                    }
+                }
+            }
+            else
+            {
+                bArrayCandidate = false;
+            }
+            Count++;
+            lua_pop(L, 1); // pop value, keep key for next lua_next
+        }
+
+        if (bArrayCandidate && Count == rawLen)
+        {
+            Out.Type = ELuaType::Array;
+            Out.Array.Reserve((int32)rawLen);
+            for (lua_Integer i = 1; i <= rawLen; ++i)
+            {
+                lua_geti(L, absIndex, i);
+                ULuaValueObject* ElemObj = NewObject<ULuaValueObject>(Owner);
+                ConvertLuaToDynValue(L, -1, ElemObj->Value, Owner, Depth + 1, MaxDepth, Visited);
+                lua_pop(L, 1);
+                Out.Array.Add(ElemObj);
+            }
+        }
+        else
+        {
+            Out.Type = ELuaType::Table;
+            Out.Table.Empty();
+            lua_pushnil(L);
+            while (lua_next(L, absIndex) != 0)
+            {
+                // key at -2, value at -1
+                FString KeyStr;
+                int kt = lua_type(L, -2);
+                switch (kt)
+                {
+                case LUA_TSTRING:
+                {
+                    size_t klen = 0; const char* ks = lua_tolstring(L, -2, &klen);
+                    KeyStr = FString(klen, UTF8_TO_TCHAR(ks));
+                    break;
+                }
+                case LUA_TNUMBER:
+                {
+                    lua_Number kn = lua_tonumber(L, -2);
+                    KeyStr = FString::SanitizeFloat(kn);
+                    break;
+                }
+                case LUA_TBOOLEAN:
+                    KeyStr = lua_toboolean(L, -2) ? TEXT("true") : TEXT("false");
+                    break;
+                default:
+                {
+                    // Fallback to tostring for complex keys
+                    size_t klen = 0; const char* ks = luaL_tolstring(L, -2, &klen);
+                    KeyStr = FString(klen, UTF8_TO_TCHAR(ks));
+                    lua_pop(L, 1); // pop tostring result
+                    break;
+                }
+                }
+
+                ULuaValueObject* ChildObj = NewObject<ULuaValueObject>(Owner);
+                ConvertLuaToDynValue(L, -1, ChildObj->Value, Owner, Depth + 1, MaxDepth, Visited);
+                Out.Table.Add(MoveTemp(KeyStr), ChildObj);
+                lua_pop(L, 1); // pop value
+            }
+        }
+
+        Visited->Remove(Ptr);
+        return;
+    }
+    default:
+        Out.Type = ELuaType::Nil; return;
+    }
+}
+
 static int LuaPrint(lua_State* L)
 {
     int nargs = lua_gettop(L);
@@ -363,6 +499,27 @@ bool ULuaSandbox::GetGlobalBool(const FName Name, bool& OutValue) const
     return false;
 }
 
+void ULuaSandbox::SetGlobalDyn(const FName Name, const FLuaDynValue& Value)
+{
+    if (!L) return;
+    PushLuaDynValue(Value);
+    lua_setglobal(L, TCHAR_TO_UTF8(*Name.ToString()));
+}
+
+bool ULuaSandbox::GetGlobalDyn(const FName Name, FLuaDynValue& OutValue) const
+{
+    if (!L) return false;
+    lua_getglobal(L, TCHAR_TO_UTF8(*Name.ToString()));
+    if (lua_isnil(L, -1))
+    {
+        lua_pop(L, 1);
+        OutValue.Type = ELuaType::Nil;
+        return false;
+    }
+    OutValue = PopLuaDynValue();
+    return OutValue.Type != ELuaType::Nil;
+}
+
 FLuaRunResult ULuaSandbox::CallFunction(const FString& FunctionName, const TArray<FLuaValue>& Args, int32 TimeoutMs)
 {
     FLuaRunResult Result;
@@ -385,6 +542,65 @@ FLuaRunResult ULuaSandbox::CallFunction(const FString& FunctionName, const TArra
     for (const FLuaValue& Arg : Args)
     {
         PushLuaValue(Arg);
+    }
+
+    // Set timeout hook
+    FHookState* HS = *reinterpret_cast<FHookState**>(lua_getextraspace(L));
+    HS->StartTimeSec = FPlatformTime::Seconds();
+    HS->TimeoutMs = TimeoutMs;
+    lua_sethook(L, &LuaHook, LUA_MASKCOUNT, FMath::Max(1, 1000));
+
+    int callStatus = lua_pcall(L, Args.Num(), 1, 0);
+    
+    // Clear hook
+    lua_sethook(L, nullptr, 0, 0);
+
+    if (callStatus != LUA_OK)
+    {
+        const char* err = lua_tostring(L, -1);
+        Result.bSuccess = false;
+        Result.Error = err ? UTF8_TO_TCHAR(err) : TEXT("Unknown runtime error");
+        lua_pop(L, 1);
+        return Result;
+    }
+
+    if (!lua_isnil(L, -1))
+    {
+        size_t len = 0;
+        const char* s = lua_tolstring(L, -1, &len);
+        if (s)
+        {
+            Result.ReturnValue = FString(len, UTF8_TO_TCHAR(s));
+        }
+    }
+    lua_pop(L, 1);
+
+    Result.bSuccess = true;
+    return Result;
+}
+
+FLuaRunResult ULuaSandbox::CallFunctionDyn(const FString& FunctionName, const TArray<FLuaDynValue>& Args, int32 TimeoutMs)
+{
+    FLuaRunResult Result;
+    if (!L)
+    {
+        Result.bSuccess = false;
+        Result.Error = TEXT("Lua state not initialized");
+        return Result;
+    }
+
+    lua_getglobal(L, TCHAR_TO_UTF8(*FunctionName));
+    if (!lua_isfunction(L, -1))
+    {
+        lua_pop(L, 1);
+        Result.bSuccess = false;
+        Result.Error = FString::Printf(TEXT("'%s' is not a function"), *FunctionName);
+        return Result;
+    }
+
+    for (const FLuaDynValue& Arg : Args)
+    {
+        PushLuaDynValue(Arg);
     }
 
     // Set timeout hook
@@ -477,6 +693,24 @@ bool ULuaSandbox::SetTableValue(const FString& TablePath, const FString& Key, co
     return true;
 }
 
+bool ULuaSandbox::SetTableValueDyn(const FString& TablePath, const FString& Key, const FLuaDynValue& Value)
+{
+    if (!L) return false;
+
+    if (!GetTableByPath(TablePath))
+    {
+        return false;
+    }
+
+    FTCHARToUTF8 Convert(*Key);
+    lua_pushlstring(L, Convert.Get(), Convert.Length());
+    PushLuaDynValue(Value);
+    lua_settable(L, -3);
+    lua_pop(L, 1);
+
+    return true;
+}
+
 bool ULuaSandbox::GetTableValue(const FString& TablePath, const FString& Key, FLuaValue& OutValue) const
 {
     if (!L) return false;
@@ -495,6 +729,24 @@ bool ULuaSandbox::GetTableValue(const FString& TablePath, const FString& Key, FL
     return !OutValue.bIsNil;
 }
 
+bool ULuaSandbox::GetTableValueDyn(const FString& TablePath, const FString& Key, FLuaDynValue& OutValue) const
+{
+    if (!L) return false;
+
+    if (!GetTableByPath(TablePath))
+    {
+        return false;
+    }
+
+    FTCHARToUTF8 Convert(*Key);
+    lua_pushlstring(L, Convert.Get(), Convert.Length());
+    lua_gettable(L, -2);
+    OutValue = PopLuaDynValue();
+    lua_pop(L, 1);
+
+    return OutValue.Type != ELuaType::Nil;
+}
+
 FLuaRunResult ULuaSandbox::RunFile(const FString& FilePath, int32 TimeoutMs, int32 HookInterval)
 {
     FLuaRunResult Result;
@@ -508,6 +760,55 @@ FLuaRunResult ULuaSandbox::RunFile(const FString& FilePath, int32 TimeoutMs, int
     }
 
     return RunString(Content, TimeoutMs, HookInterval);
+}
+
+bool ULuaSandbox::RunStringDyn(const FString& Code, int32 TimeoutMs, int32 HookInterval, FLuaDynValue& OutValue, FString& OutError)
+{
+    if (!L)
+    {
+        OutError = TEXT("Lua state is not initialized");
+        return false;
+    }
+    FTCHARToUTF8 CodeUtf8(*Code);
+    int loadStatus = luaL_loadbufferx(L, CodeUtf8.Get(), CodeUtf8.Length(), "chunk", "t");
+    if (loadStatus != LUA_OK)
+    {
+        const char* err = lua_tostring(L, -1);
+        OutError = err ? UTF8_TO_TCHAR(err) : TEXT("Unknown load error");
+        lua_pop(L, 1);
+        return false;
+    }
+
+    FHookState* HS = *reinterpret_cast<FHookState**>(lua_getextraspace(L));
+    HS->StartTimeSec = FPlatformTime::Seconds();
+    HS->TimeoutMs = TimeoutMs;
+    lua_sethook(L, &LuaHook, LUA_MASKCOUNT, FMath::Max(1, HookInterval));
+
+    int callStatus = lua_pcall(L, 0, 1, 0);
+    
+    lua_sethook(L, nullptr, 0, 0);
+
+    if (callStatus != LUA_OK)
+    {
+        const char* err = lua_tostring(L, -1);
+        OutError = err ? UTF8_TO_TCHAR(err) : TEXT("Unknown runtime error");
+        lua_pop(L, 1);
+        return false;
+    }
+
+    OutValue = PopLuaDynValue();
+    return true;
+}
+
+bool ULuaSandbox::RunFileDyn(const FString& FilePath, int32 TimeoutMs, int32 HookInterval, FLuaDynValue& OutValue, FString& OutError)
+{
+    FString Content;
+    if (!FFileHelper::LoadFileToString(Content, *FilePath))
+    {
+        OutError = FString::Printf(TEXT("Failed to read file: %s"), *FilePath);
+        return false;
+    }
+    return RunStringDyn(Content, TimeoutMs, HookInterval, OutValue, OutError);
 }
 
 void ULuaSandbox::RegisterCallback(const FString& CallbackName)
@@ -590,6 +891,12 @@ FLuaRunResult ULuaSandbox::EvaluateExpression(const FString& Expression, int32 T
     return Result;
 }
 
+bool ULuaSandbox::EvaluateExpressionDyn(const FString& Expression, int32 TimeoutMs, FLuaDynValue& OutValue, FString& OutError)
+{
+    FString EvalCode = FString::Printf(TEXT("return %s"), *Expression);
+    return RunStringDyn(EvalCode, TimeoutMs, 1000, OutValue, OutError);
+}
+
 void ULuaSandbox::PushLuaValue(const FLuaValue& Value)
 {
     if (!L) return;
@@ -647,6 +954,77 @@ FLuaValue ULuaSandbox::PopLuaValue() const
 
     lua_pop(L, 1);
     return Value;
+}
+
+void ULuaSandbox::PushLuaDynValue(const FLuaDynValue& Value)
+{
+    if (!L) return;
+    switch (Value.Type)
+    {
+    case ELuaType::Nil:
+        lua_pushnil(L);
+        break;
+    case ELuaType::Boolean:
+        lua_pushboolean(L, Value.Boolean ? 1 : 0);
+        break;
+    case ELuaType::Number:
+        lua_pushnumber(L, Value.Number);
+        break;
+    case ELuaType::String:
+    {
+        FTCHARToUTF8 Convert(*Value.String);
+        lua_pushlstring(L, Convert.Get(), Convert.Length());
+        break;
+    }
+    case ELuaType::Array:
+    {
+        lua_createtable(L, Value.Array.Num(), 0);
+        int index = 1;
+        for (const TObjectPtr<ULuaValueObject>& ElemObjPtr : Value.Array)
+        {
+            ULuaValueObject* ElemObj = ElemObjPtr.Get();
+            if (ElemObj)
+            {
+                PushLuaDynValue(ElemObj->Value);
+            }
+            else
+            {
+                lua_pushnil(L);
+            }
+            lua_seti(L, -2, index++);
+        }
+        break;
+    }
+    case ELuaType::Table:
+    {
+        lua_createtable(L, 0, Value.Table.Num());
+        for (const auto& Pair : Value.Table)
+        {
+            FTCHARToUTF8 KeyUtf8(*Pair.Key);
+            lua_pushlstring(L, KeyUtf8.Get(), KeyUtf8.Length());
+            ULuaValueObject* Child = Pair.Value.Get();
+            if (Child)
+            {
+                PushLuaDynValue(Child->Value);
+            }
+            else
+            {
+                lua_pushnil(L);
+            }
+            lua_settable(L, -3);
+        }
+        break;
+    }
+    }
+}
+
+FLuaDynValue ULuaSandbox::PopLuaDynValue() const
+{
+    FLuaDynValue V;
+    if (!L) return V;
+    ConvertLuaToDynValue(L, -1, V, const_cast<ULuaSandbox*>(this));
+    lua_pop(L, 1);
+    return V;
 }
 
 bool ULuaSandbox::GetTableByPath(const FString& TablePath) const
