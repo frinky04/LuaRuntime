@@ -34,16 +34,17 @@ public class LuaRuntime : ModuleRules
 			);
 			
 		
-		PrivateDependencyModuleNames.AddRange(
-			new string[]
-			{
-				"CoreUObject",
-				"Engine",
-				"Slate",
-				"SlateCore",
-				// ... add private dependencies that you statically link with here ...	
-			}
-		);
+        PrivateDependencyModuleNames.AddRange(
+            new string[]
+            {
+                "CoreUObject",
+                "Engine",
+                "Slate",
+                "SlateCore",
+                "DeveloperSettings",
+                // ... add private dependencies that you statically link with here ... 
+            }
+        );
 
 		// Treat C files as C and not C++ where applicable
 		bEnableUndefinedIdentifierWarnings = false;

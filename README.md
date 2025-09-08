@@ -5,6 +5,7 @@
 - Sandboxed by default: no file I/O, no OS, no dynamic library loading, and binary chunk loading disabled.
 - Memory limit (allocator cap) and wall-clock timeout via instruction hook.
 - Simple Blueprint API for running scripts and maintaining state.
+- Editor integration: Lua Script asset type + Project Settings panel.
 
 ## Installation
 - Place the plugin under `Plugins/LuaRuntime` in your project.
@@ -22,6 +23,13 @@
 - `LuaRuntimeSubsystem.EvaluateExpression(Expression, MemoryLimitKB, TimeoutMs)` → evaluate a Lua expression and return result.
 - `LuaRuntimeSubsystem.ValidateLuaSyntax(Code, OutError)` → check syntax without execution.
 - `LuaRuntimeSubsystem.ClearAllSandboxes()` → remove all named sandboxes.
+
+### Blueprint Library Shortcuts
+- `Execute Lua Chunk(WorldContext, Code, MemoryKB, TimeoutMs, HookInterval)` → convenience wrapper for one‑off code.
+- `Execute Lua File(WorldContext, FilePath, MemoryKB, TimeoutMs, HookInterval)` → loads file then executes.
+- `Evaluate Lua Expression(WorldContext, Expression, MemoryKB, TimeoutMs)` → returns expression value.
+- `Execute Lua Script Asset(WorldContext, ULuaScript)` → run a `ULuaScript` asset.
+- `Get Lua Runtime Subsystem(WorldContext)` → fetch the subsystem quickly.
 
 ### Sandbox Methods
 - `LuaSandbox.Initialize(MemoryLimitKB)` → init sandbox (auto-called by `CreateSandbox`).
@@ -46,6 +54,29 @@
 - `FLuaValue` → Flexible value type with `StringValue`, `NumberValue`, `BoolValue`, and `bIsNil` fields.
 - `OnLuaCallback` → Blueprint event delegate that fires when Lua calls a registered callback.
 
+## Actor Component
+- `ULuaComponent` can be added to any Actor.
+  - Configure to run a File path, a `ULuaScript` asset, or Inline code.
+  - Optional Named Sandbox to share state across actors.
+  - Exposes `ExecuteConfiguredScript()` and `CallLuaFunction()` utilities.
+
+## Editor Integration & Assets
+- Lua Script Asset: Content Browser → Add → Miscellaneous → Lua Script.
+  - Edit `Source` text; click Validate Syntax (auto‑validates on edit).
+  - Use in Blueprints via `Execute Lua Script Asset` or via `ULuaComponent`.
+
+## Project Settings
+- Project Settings → Plugins → LuaRuntime
+  - Printing
+    - On‑Screen Print Enabled (default on)
+    - On‑Screen Print Duration (seconds)
+    - On‑Screen Print Color
+    - Allow On‑Screen Print In Shipping (default off)
+  - Execution Defaults
+    - Default Memory Limit (KB)
+    - Default Timeout (ms)
+    - Default Hook Interval (instructions)
+
 ## Safety
 - Only safe libraries are opened: `base`, `table`, `string`, `math`, `utf8`, `coroutine`.
 - Removed base functions: `dofile`, `loadfile`, and `load` (no file access, no binary chunks).
@@ -54,7 +85,7 @@
 - Custom allocator enforces a hard memory cap. Allocation beyond the cap fails gracefully with a Lua error.
 
 ## Notes
-- `print(...)` is replaced to log via UE (`LogLuaRuntime`).
+- `print(...)` logs via UE (`LogLuaRuntime`) and, if enabled in settings, shows an on‑screen message.
 - Binary chunks are disallowed; code is loaded in text-only mode.
 - This initial version exposes a minimal API. You can add whitelisted native functions to the sandbox by pushing additional C functions into the Lua state in `ULuaSandbox::OpenSafeLibs()`.
 
@@ -113,4 +144,3 @@ From Lua: `onEvent("player_died", 100)` → Triggers the `OnLuaCallback` Bluepri
 
 ## License
 - Lua is © PUC-Rio and distributed under the MIT license. See the upstream Lua distribution for details.
-

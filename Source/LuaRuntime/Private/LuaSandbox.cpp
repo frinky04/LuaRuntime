@@ -2,6 +2,8 @@
 #include "LuaRuntime.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
+#include "Engine/Engine.h" // GEngine->AddOnScreenDebugMessage
+#include "LuaRuntimeSettings.h"
 #include <cstdlib>
 
 // Lua headers (vendored under Private/ThirdParty/lua_slim/src)
@@ -97,6 +99,21 @@ static int LuaPrint(lua_State* L)
         lua_pop(L, 1); // pop tostring result
     }
     UE_LOG(LogLuaRuntime, Log, TEXT("[lua] %s"), *Out);
+
+    if (GEngine)
+    {
+        const ULuaRuntimeSettings* Settings = GetDefault<ULuaRuntimeSettings>();
+        bool bAllowOnScreen = Settings && Settings->bOnScreenPrintEnabled;
+#if UE_BUILD_SHIPPING
+        bAllowOnScreen = bAllowOnScreen && Settings && Settings->bAllowOnScreenPrintInShipping;
+#endif
+        if (bAllowOnScreen)
+        {
+            const float Duration = Settings ? Settings->OnScreenPrintDuration : 4.0f;
+            const FColor Color = Settings ? Settings->OnScreenPrintColor.ToFColor(true) : FColor::Green;
+            GEngine->AddOnScreenDebugMessage(/*Key*/-1, Duration, Color, FString::Printf(TEXT("[lua] %s"), *Out));
+        }
+    }
     return 0;
 }
 
